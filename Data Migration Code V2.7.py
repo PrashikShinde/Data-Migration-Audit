@@ -143,6 +143,11 @@ def get_table_data(connection, schema_name, table_name):
 ###############################################################################
 
 def count_validation(old_conn, new_conn, old_schema, new_schema, results_dir):
+    """
+    Validates table existence, row counts, and total cell counts
+    (rows * columns) between the old and new databases.
+    Discrepancies and a detailed comparison are saved to a CSV file.
+    """
     count_validation_csv = os.path.join(results_dir, "count_validation.csv")
     discrepancies = []
     detailed_comparison = []
@@ -150,6 +155,7 @@ def count_validation(old_conn, new_conn, old_schema, new_schema, results_dir):
     old_tables = get_table_list(old_conn, old_schema)
     new_tables = get_table_list(new_conn, new_schema)
 
+    # Identify missing and extra tables
     missing_tables = set(old_tables) - set(new_tables)
     extra_tables = set(new_tables) - set(old_tables)
 
@@ -159,6 +165,10 @@ def count_validation(old_conn, new_conn, old_schema, new_schema, results_dir):
             "Table": table,
             "Old Row Count": "",
             "New Row Count": "",
+            "Old Column Count": "",
+            "New Column Count": "",
+            "Old Total Values": "",
+            "New Total Values": "",
             "Details": "Table is missing in the new database."
         })
 
@@ -168,51 +178,110 @@ def count_validation(old_conn, new_conn, old_schema, new_schema, results_dir):
             "Table": table,
             "Old Row Count": "",
             "New Row Count": "",
+            "Old Column Count": "",
+            "New Column Count": "",
+            "Old Total Values": "",
+            "New Total Values": "",
             "Details": "Table is extra in the new database."
         })
 
+    # Compare row counts and total cell counts for common tables
     common_tables = set(old_tables).intersection(new_tables)
     for table in common_tables:
         try:
+            # Get row count from old DB
             old_cursor = old_conn.cursor()
             old_cursor.execute(f"SELECT COUNT(*) FROM {old_schema}.{table}")
-            old_count = old_cursor.fetchone()[0]
+            old_row_count = old_cursor.fetchone()[0]
             old_cursor.close()
 
+            # Get row count from new DB
             new_cursor = new_conn.cursor()
             new_cursor.execute(f"SELECT COUNT(*) FROM {new_schema}.{table}")
-            new_count = new_cursor.fetchone()[0]
+            new_row_count = new_cursor.fetchone()[0]
             new_cursor.close()
 
-            if old_count != new_count:
+            # Get column count from old DB schema
+            old_table_def = get_table_schema(old_conn, old_schema, table)
+            old_col_count = len(old_table_def)
+
+            # Get column count from new DB schema
+            new_table_def = get_table_schema(new_conn, new_schema, table)
+            new_col_count = len(new_table_def)
+
+            # Compute total cell count (row_count * col_count)
+            old_total_values = old_row_count * old_col_count
+            new_total_values = new_row_count * new_col_count
+
+            # Check row count mismatch
+            if old_row_count != new_row_count:
                 discrepancies.append({
                     "Type": "Row Count Mismatch",
                     "Table": table,
-                    "Old Row Count": old_count,
-                    "New Row Count": new_count,
-                    "Details": f"Row counts do not match: Old={old_count}, New={new_count}"
+                    "Old Row Count": old_row_count,
+                    "New Row Count": new_row_count,
+                    "Old Column Count": old_col_count,
+                    "New Column Count": new_col_count,
+                    "Old Total Values": old_total_values,
+                    "New Total Values": new_total_values,
+                    "Details": f"Row counts do not match: Old={old_row_count}, New={new_row_count}"
                 })
 
-            # Add to detailed comparison
+            # Check total cell-count mismatch
+            if old_total_values != new_total_values:
+                discrepancies.append({
+                    "Type": "Total Value Count Mismatch",
+                    "Table": table,
+                    "Old Row Count": old_row_count,
+                    "New Row Count": new_row_count,
+                    "Old Column Count": old_col_count,
+                    "New Column Count": new_col_count,
+                    "Old Total Values": old_total_values,
+                    "New Total Values": new_total_values,
+                    "Details": (
+                        f"Mismatch in total values (rows*columns): "
+                        f"Old={old_total_values}, New={new_total_values}"
+                    )
+                })
+
+            # Add to detailed comparison for each table
             detailed_comparison.append({
                 "Table": table,
-                "Old Row Count": old_count,
-                "New Row Count": new_count
+                "Old Row Count": old_row_count,
+                "New Row Count": new_row_count,
+                "Old Column Count": old_col_count,
+                "New Column Count": new_col_count,
+                "Old Total Values": old_total_values,
+                "New Total Values": new_total_values,
+                "Details": "OK"
             })
+
         except cx_Oracle.DatabaseError as e:
             discrepancies.append({
                 "Type": "Database Error",
                 "Table": table,
                 "Old Row Count": "N/A",
                 "New Row Count": "N/A",
+                "Old Column Count": "N/A",
+                "New Column Count": "N/A",
+                "Old Total Values": "",
+                "New Total Values": "",
                 "Details": str(e)
             })
 
+    # Write CSV
     with open(count_validation_csv, "w", newline="") as f:
-        fieldnames = ["Type", "Table", "Old Row Count", "New Row Count", "Details"]
+        fieldnames = [
+            "Type", "Table",
+            "Old Row Count", "New Row Count",
+            "Old Column Count", "New Column Count",
+            "Old Total Values", "New Total Values",
+            "Details"
+        ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
 
+        # Discrepancies first
         if discrepancies:
             writer.writerows(discrepancies)
         else:
@@ -221,6 +290,10 @@ def count_validation(old_conn, new_conn, old_schema, new_schema, results_dir):
                 "Table": "",
                 "Old Row Count": "",
                 "New Row Count": "",
+                "Old Column Count": "",
+                "New Column Count": "",
+                "Old Total Values": "",
+                "New Total Values": "",
                 "Details": ""
             })
 
@@ -233,19 +306,29 @@ def count_validation(old_conn, new_conn, old_schema, new_schema, results_dir):
             "Table": "",
             "Old Row Count": "",
             "New Row Count": "",
+            "Old Column Count": "",
+            "New Column Count": "",
+            "Old Total Values": "",
+            "New Total Values": "",
             "Details": ""
         })
         writer.writerow({})
         for row in detailed_comparison:
-            writer.writerow({
+            row_out = {
                 "Type": "Detailed Comparison",
                 "Table": row["Table"],
                 "Old Row Count": row["Old Row Count"],
                 "New Row Count": row["New Row Count"],
-                "Details": ""
-            })
+                "Old Column Count": row["Old Column Count"],
+                "New Column Count": row["New Column Count"],
+                "Old Total Values": row["Old Total Values"],
+                "New Total Values": row["New Total Values"],
+                "Details": row["Details"]
+            }
+            writer.writerow(row_out)
 
     print(f"[INFO] Count validation saved to {count_validation_csv}")
+
 
 ###############################################################################
 # Schema Validation
@@ -911,7 +994,7 @@ def get_views(connection, schema_name):
     return views
 
 def miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, results_dir):
-    misc_csv = os.path.join(results_dir, "miscellaneous_discrepancies.csv")
+    misc_csv = os.path.join(results_dir, "table_hygiene_check.csv")
     discrepancies = []
     detailed_comparison = []
 
@@ -1085,7 +1168,6 @@ def main():
 
     old_schema = old_db_config["schema"]
     new_schema = new_db_config["schema"]
-    chunk_size = params["chunk_size"]  # For the original code, if needed
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
@@ -1095,14 +1177,17 @@ def main():
         old_conn = get_oracle_connection(old_db_config)
         new_conn = get_oracle_connection(new_db_config)
 
+        print("Connection Established!!")
+
         # Table lists
         old_tables = get_table_list(old_conn, old_schema)
         new_tables = get_table_list(new_conn, new_schema)
         common_tables = set(old_tables).intersection(new_tables)
 
         # Perform validations:
-        count_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
+        miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, results_dir)
         schema_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
+        count_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
         aggregate_function_validation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
         sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
 
@@ -1112,7 +1197,6 @@ def main():
         # -- Null Value Verification (added back) --
         null_value_verification(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
 
-        miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, results_dir)
 
     finally:
         close_connection(old_conn)
