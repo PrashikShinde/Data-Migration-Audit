@@ -3,6 +3,7 @@ import csv
 import os
 import datetime
 
+
 ###############################################################################
 # Prompt for User Inputs
 ###############################################################################
@@ -81,22 +82,30 @@ def get_table_list(connection, schema_name):
     return tables
 
 def get_table_schema(connection, schema_name, table_name):
+    """
+    Retrieves a dictionary of column_name -> (data_type, data_length) for the given table.
+    Uses Oracle's ALL_TAB_COLUMNS view.
+    """
     query = """
-    SELECT column_name, data_type, data_length
-    FROM all_tab_columns
-    WHERE owner = UPPER(:schema_param)
-      AND table_name = UPPER(:table_param)
-    ORDER BY column_id
+        SELECT column_name, data_type, data_length
+        FROM all_tab_columns
+        WHERE owner = UPPER(:schema_param)
+          AND table_name = UPPER(:table_param)
+        ORDER BY column_id
     """
     cursor = connection.cursor()
     cursor.execute(query, schema_param=schema_name, table_param=table_name)
-    schema = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+    schema = {}
+    for row in cursor.fetchall():
+        col_name, data_type, data_length = row
+        # Store (data_type, data_length) if needed, e.g., {"CUSTOMER_ID": ("NUMBER", 22)}
+        schema[col_name] = (data_type, data_length)
     cursor.close()
     return schema
 
 def get_primary_key_columns(connection, schema_name, table_name):
     """
-    Returns a list of primary key column names for the given table.
+    Returns a list of primary key column names for the given table (Oracle).
     If the table has no primary key, returns an empty list.
     """
     query = """
@@ -771,123 +780,183 @@ def null_value_verification(old_conn, new_conn, old_schema, new_schema, tables, 
 # SQL Join Validation (Primary Key)
 ###############################################################################
 
-def sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
+def sql_join_operation_validation_with_details(
+        old_conn, new_conn, old_schema, new_schema, tables, results_dir
+):
+    """
+    Performs LEFT, RIGHT, and FULL OUTER JOIN comparisons of each table
+    from old_schema vs new_schema, checking for missing rows and data mismatches.
+    """
+
+    import os
+    import csv
+
     join_validation_csv = os.path.join(results_dir, "sql_join_validation.csv")
     discrepancies = []
     detailed_comparison = []
+
+    # Make sure results directory exists
+    os.makedirs(results_dir, exist_ok=True)
 
     for table in tables:
         print(f"[INFO] Performing SQL join operation validation for table '{table}'...")
 
         try:
+            # Get schema details
             old_table_schema = get_table_schema(old_conn, old_schema, table)
             new_table_schema = get_table_schema(new_conn, new_schema, table)
 
+            # Skip if table not found or no columns
             if not old_table_schema or not new_table_schema:
                 continue
 
+            # Get PK columns, fallback if none
             pk_cols = get_primary_key_columns(old_conn, old_schema, table)
             if not pk_cols:
-                # fallback to first column if no PK
                 pk_cols = [list(old_table_schema.keys())[0]]
 
-            join_condition = " AND ".join([f"o.{col} = n.{col}" for col in pk_cols])
+            # Build the join condition using PK columns (unquoted)
+            # If your columns might have special chars or mixed case, you'll need quotes.
+            join_condition = " AND ".join([
+                f"o.{col} = n.{col}" for col in pk_cols
+            ])
+            if not join_condition:
+                continue
 
-            # Inner Join
-            inner_query = f"""
-            SELECT o.*, n.*
-            FROM {old_schema}.{table} o
-            INNER JOIN {new_schema}.{table} n
-            ON {join_condition}
-            """
-            cursor = old_conn.cursor()
-            cursor.execute(inner_query)
-            inner_rows = cursor.fetchall()
-            cursor.close()
+            # Collect columns
+            old_columns = list(old_table_schema.keys())
+            new_columns = list(new_table_schema.keys())
 
-            if not inner_rows:
-                discrepancies.append({
-                    "Type": "Inner Join Mismatch",
-                    "Table": table,
-                    "Row": "",
-                    "Join Key": ", ".join(pk_cols),
-                    "Details": f"No matching rows found in INNER JOIN for table '{table}'."
-                })
+            # Create SELECT aliases (unquoted)
+            old_col_str = ", ".join([
+                f"o.{col} AS old_{col}" for col in old_columns
+            ])
+            new_col_str = ", ".join([
+                f"n.{col} AS new_{col}" for col in new_columns
+            ])
 
-            # Full Outer Join
-            full_outer_query = f"""
-            SELECT o.*, n.*
-            FROM {old_schema}.{table} o
-            FULL OUTER JOIN {new_schema}.{table} n
-            ON {join_condition}
-            """
-            cursor = new_conn.cursor()
-            cursor.execute(full_outer_query)
-            full_outer_rows = cursor.fetchall()
-            cursor.close()
-
-            if not full_outer_rows:
-                discrepancies.append({
-                    "Type": "Full Outer Join Mismatch",
-                    "Table": table,
-                    "Row": "",
-                    "Join Key": ", ".join(pk_cols),
-                    "Details": f"No rows found in FULL OUTER JOIN for table '{table}'."
-                })
-
-            # Left Join
+            # 1) LEFT JOIN
             left_join_query = f"""
-            SELECT o.*
-            FROM {old_schema}.{table} o
-            LEFT JOIN {new_schema}.{table} n
-            ON {join_condition}
-            WHERE {" OR ".join([f"n.{c} IS NULL" for c in pk_cols])}
+                SELECT {old_col_str}, {new_col_str}
+                FROM {old_schema}.{table} o
+                LEFT JOIN {new_schema}.{table} n
+                ON {join_condition}
             """
             cursor = old_conn.cursor()
             cursor.execute(left_join_query)
             left_join_rows = cursor.fetchall()
+            left_join_cols = [desc[0] for desc in cursor.description]
             cursor.close()
 
-            for row in left_join_rows:
-                discrepancies.append({
-                    "Type": "Left Join Mismatch",
-                    "Table": table,
-                    "Row": str(row),
-                    "Join Key": ", ".join(pk_cols),
-                    "Details": f"Row in old DB not found in new DB for table '{table}'."
-                })
-
-            # Right Join
+            # 2) RIGHT JOIN
             right_join_query = f"""
-            SELECT n.*
-            FROM {old_schema}.{table} o
-            RIGHT JOIN {new_schema}.{table} n
-            ON {join_condition}
-            WHERE {" OR ".join([f"o.{c} IS NULL" for c in pk_cols])}
+                SELECT {old_col_str}, {new_col_str}
+                FROM {old_schema}.{table} o
+                RIGHT JOIN {new_schema}.{table} n
+                ON {join_condition}
             """
             cursor = new_conn.cursor()
             cursor.execute(right_join_query)
             right_join_rows = cursor.fetchall()
+            right_join_cols = [desc[0] for desc in cursor.description]
             cursor.close()
 
-            for row in right_join_rows:
-                discrepancies.append({
-                    "Type": "Right Join Mismatch",
-                    "Table": table,
-                    "Row": str(row),
-                    "Join Key": ", ".join(pk_cols),
-                    "Details": f"Row in new DB not found in old DB for table '{table}'."
-                })
+            # 3) FULL OUTER JOIN
+            full_outer_query = f"""
+                SELECT {old_col_str}, {new_col_str}
+                FROM {old_schema}.{table} o
+                FULL OUTER JOIN {new_schema}.{table} n
+                ON {join_condition}
+            """
+            cursor = new_conn.cursor()
+            cursor.execute(full_outer_query)
+            full_outer_rows = cursor.fetchall()
+            full_outer_cols = [desc[0] for desc in cursor.description]
+            cursor.close()
 
-            # Summarize
+            # Check for missing rows (Left, Right) & data mismatches (Full)
+            # -- Left Join --
+            for row in left_join_rows:
+                row_dict = dict(zip(left_join_cols, row))
+                null_new_cols = [
+                    col for col in new_columns
+                    if row_dict.get(f"NEW_{col}") is None
+                ]
+                if null_new_cols:
+                    discrepancies.append({
+                        "Type": "Left Join Discrepancy",
+                        "Table": table,
+                        "Row": str(row_dict),
+                        "Join Key": ", ".join(pk_cols),
+                        "Details": f"Row in OLD DB but missing in NEW DB (NULL in {null_new_cols})"
+                    })
+
+            # -- Right Join --
+            for row in right_join_rows:
+                row_dict = dict(zip(right_join_cols, row))
+                null_old_cols = [
+                    col for col in old_columns
+                    if row_dict.get(f"OLD_{col}") is None
+                ]
+                if null_old_cols:
+                    discrepancies.append({
+                        "Type": "Right Join Discrepancy",
+                        "Table": table,
+                        "Row": str(row_dict),
+                        "Join Key": ", ".join(pk_cols),
+                        "Details": f"Row in NEW DB but missing in OLD DB (NULL in {null_old_cols})"
+                    })
+
+            # -- Full Outer Join --
+            for row in full_outer_rows:
+                row_dict = dict(zip(full_outer_cols, row))
+                null_old_cols = [
+                    col for col in old_columns
+                    if row_dict.get(f"OLD_{col}") is None
+                ]
+                null_new_cols = [
+                    col for col in new_columns
+                    if row_dict.get(f"NEW_{col}") is None
+                ]
+
+                if null_old_cols or null_new_cols:
+                    # Entire row is missing on one side
+                    discrepancies.append({
+                        "Type": "Full Outer Join Discrepancy",
+                        "Table": table,
+                        "Row": str(row_dict),
+                        "Join Key": ", ".join(pk_cols),
+                        "Details": (
+                            f"Row missing on one side. "
+                            f"NULL old cols: {null_old_cols}, NULL new cols: {null_new_cols}"
+                        )
+                    })
+                else:
+                    # If both sides exist, compare columns
+                    for col in old_columns:
+                        if col in new_columns:
+                            old_val = row_dict.get(f"OLD_{col}")
+                            new_val = row_dict.get(f"NEW_{col}")
+                            if old_val != new_val:
+                                discrepancies.append({
+                                    "Type": "Data Mismatch",
+                                    "Table": table,
+                                    "Row": str(row_dict),
+                                    "Join Key": ", ".join(pk_cols),
+                                    "Details": (
+                                        f"Column '{col}' mismatch: "
+                                        f"old_value={old_val} vs new_value={new_val}"
+                                    )
+                                })
+
+            # Summaries
             detailed_comparison.append({
                 "Type": "Detailed Comparison",
                 "Table": table,
                 "Join Key": ", ".join(pk_cols),
-                "Inner Join Rows": len(inner_rows),
-                "Full Outer Join Rows": len(full_outer_rows),
                 "Left Join Rows": len(left_join_rows),
                 "Right Join Rows": len(right_join_rows),
+                "Full Outer Join Rows": len(full_outer_rows),
                 "Details": "Join analysis complete"
             })
 
@@ -900,6 +969,7 @@ def sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, n
                 "Details": str(e)
             })
 
+    # Write CSV
     with open(join_validation_csv, "w", newline="") as f:
         fieldnames = ["Type", "Table", "Row", "Join Key", "Details"]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -916,10 +986,11 @@ def sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, n
                 "Details": ""
             })
 
+        # Blank lines
         writer.writerow({})
         writer.writerow({})
 
-        # Detailed comparison
+        # Summaries
         writer.writerow({
             "Type": "Detailed Comparison Below",
             "Table": "",
@@ -928,16 +999,18 @@ def sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, n
             "Details": ""
         })
         writer.writerow({})
+
         fieldnames2 = [
             "Type", "Table", "Join Key",
-            "Inner Join Rows", "Full Outer Join Rows",
-            "Left Join Rows", "Right Join Rows", "Details"
+            "Left Join Rows", "Right Join Rows",
+            "Full Outer Join Rows", "Details"
         ]
         writer2 = csv.DictWriter(f, fieldnames=fieldnames2)
         writer2.writeheader()
         writer2.writerows(detailed_comparison)
 
     print(f"[INFO] SQL join operation validation saved to {join_validation_csv}")
+
 
 ###############################################################################
 # Miscellaneous Discrepancies

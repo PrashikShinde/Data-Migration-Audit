@@ -300,6 +300,7 @@ def main():
 
     # 2) Completely remove (if exists) and re-create new schema
     print(f"\n[INFO] Dropping user {new_schema} CASCADE if exists ...")
+    drop_user_cascade(dba_cursor, old_schema)
     drop_user_cascade(dba_cursor, new_schema)
     print(f"[INFO] Creating (or verifying) old schema {old_schema} ...")
     create_schema(dba_cursor, old_schema, old_pass)
