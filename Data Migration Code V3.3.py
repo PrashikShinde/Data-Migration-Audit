@@ -1263,17 +1263,16 @@ def main():
         count_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
         aggregate_function_validation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
         sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-
-        # -- Original Value-by-Value Comparison (unchanged) --
         value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-
-        # -- Null Value Verification (added back) --
         null_value_verification(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
 
 
     finally:
         close_connection(old_conn)
         close_connection(new_conn)
+        os.system("python notify_on_completion.py")
+        print("Connection Closed!!")
+
 
 if __name__ == "__main__":
     main()
