@@ -2,6 +2,10 @@ import cx_Oracle
 import csv
 import os
 import datetime
+import subprocess
+import time
+import datetime
+from notify_on_completion import send_telegram_notification, BOT_TOKEN, CHAT_IDS
 
 
 ###############################################################################
@@ -1235,6 +1239,11 @@ def miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, resu
 
 def main():
     params = prompt_user_for_info()
+    # Start the notification script in the background
+    notification_process = subprocess.Popen(["python", "notify_on_completion.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # Allow the bot script to initialize
+    time.sleep(2)
 
     old_db_config = params["old_db_config"]
     new_db_config = params["new_db_config"]
@@ -1246,11 +1255,15 @@ def main():
     results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
     os.makedirs(results_dir, exist_ok=True)
 
+    total_steps = 7
+    step = 0
+
     try:
+        print("\n[INFO] Establishing database connections...")
         old_conn = get_oracle_connection(old_db_config)
         new_conn = get_oracle_connection(new_db_config)
 
-        print("Connection Established!!")
+        print("Connection Established Successfully!!")
 
         # Table lists
         old_tables = get_table_list(old_conn, old_schema)
@@ -1258,21 +1271,60 @@ def main():
         common_tables = set(old_tables).intersection(new_tables)
 
         # Perform validations:
-        miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, results_dir)
-        schema_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
-        count_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
-        aggregate_function_validation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        null_value_verification(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
 
+        # Step 1: Table Sanity Check
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Validating Table Sanity...")
+        miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, results_dir)
+        step += 1
+
+        # Step 2: Schema Validation
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Validating Schema...")
+        schema_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
+        step += 1
+
+        # step 3: Count Validation
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Checking Row Counts...")
+        count_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
+        step += 1
+
+        # Step 4: Aggregate Function Validation
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Performing Aggregate Checks...")
+        aggregate_function_validation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
+        step += 1
+
+        # Step 5: SQL Join Validation
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Running SQL Join Validations...")
+        sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
+        step += 1
+
+        # Step 6: Value-by-Value Comparison
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Comparing Data...")
+        value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
+        step += 1
+
+        # Step 6: Null Value Validation
+        progress = int((step / total_steps) * 100)
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Checking for NULL Values...")
+        null_value_verification(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
+        step += 1
+
+        progress = 100
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, "✅ Data Migration Audit Completed Successfully!")
+
+    except Exception as e:
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"⚠️ Error: {str(e)}")
+        print(f"[ERROR] Migration failed: {e}")
 
     finally:
         close_connection(old_conn)
         close_connection(new_conn)
-        os.system("python notify_on_completion.py")
         print("Connection Closed!!")
-
 
 if __name__ == "__main__":
     main()
