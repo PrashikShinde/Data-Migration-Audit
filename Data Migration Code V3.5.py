@@ -4,7 +4,6 @@ import os
 import datetime
 import subprocess
 import time
-import datetime
 from notify_on_completion import send_telegram_notification, BOT_TOKEN, CHAT_IDS
 
 

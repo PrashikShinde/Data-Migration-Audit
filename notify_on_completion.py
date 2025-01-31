@@ -35,7 +35,7 @@ def send_telegram_notification(bot_token, chat_ids, message):
 
 def process_task():
     global progress
-    total_steps = 6
+    total_steps = 7
     step = 0
 
     try:
