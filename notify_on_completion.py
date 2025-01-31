@@ -32,42 +32,6 @@ def send_telegram_notification(bot_token, chat_ids, message):
         except Exception as e:
             print(f"[ERROR] Exception occurred while sending notification: {e}")
 
-
-def process_task():
-    global progress
-    total_steps = 7
-    step = 0
-
-    try:
-        print("[INFO] Establishing database connections...")
-        # Simulating connection setup
-        time.sleep(2)
-        print("[INFO] Connection established successfully!")
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_dir = f"audit_results_{timestamp}"
-        os.makedirs(results_dir, exist_ok=True)
-
-        steps = [
-            "Validating Schema...",
-            "Checking Row Counts...",
-            "Performing Aggregate Checks...",
-            "Running SQL Join Validations...",
-            "Comparing Data...",
-            "Checking for NULL Values..."
-        ]
-
-        for step, message in enumerate(steps, 1):
-            progress = int((step / total_steps) * 100)
-            send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - {message}")
-            time.sleep(2)  # Simulating processing time
-
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, "✅ Data Migration Audit Completed Successfully!")
-
-    except Exception as e:
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"⚠️ Error: {str(e)}")
-        print(f"[ERROR] Migration failed: {e}")
-
-
 @app.route(f"/bot{BOT_TOKEN}", methods=["POST"])
 def receive_telegram_update():
     global progress
