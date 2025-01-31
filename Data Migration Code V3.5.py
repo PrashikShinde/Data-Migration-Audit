@@ -6,7 +6,6 @@ import subprocess
 import time
 from notify_on_completion import send_telegram_notification, BOT_TOKEN, CHAT_IDS
 
-
 ###############################################################################
 # Prompt for User Inputs
 ###############################################################################
