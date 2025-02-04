@@ -1249,9 +1249,9 @@ def main():
     old_schema = old_db_config["schema"]
     new_schema = new_db_config["schema"]
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
-    os.makedirs(results_dir, exist_ok=True)
+    # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
+    # os.makedirs(results_dir, exist_ok=True)
 
     total_steps = 7
     step = 0
