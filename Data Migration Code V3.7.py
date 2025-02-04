@@ -790,9 +790,6 @@ def sql_join_operation_validation_with_details(
     from old_schema vs new_schema, checking for missing rows and data mismatches.
     """
 
-    import os
-    import csv
-
     join_validation_csv = os.path.join(results_dir, "sql_join_validation.csv")
     discrepancies = []
     detailed_comparison = []
@@ -1249,9 +1246,9 @@ def main():
     old_schema = old_db_config["schema"]
     new_schema = new_db_config["schema"]
 
-    # timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    # results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
-    # os.makedirs(results_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
+    os.makedirs(results_dir, exist_ok=True)
 
     total_steps = 7
     step = 0
