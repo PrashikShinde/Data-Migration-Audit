@@ -6,6 +6,12 @@ import subprocess
 import time
 from notify_on_completion import send_telegram_notification, BOT_TOKEN, CHAT_IDS
 
+# oracle_client_path = r'D:\Users\T000670\Downloads\instantclient-basic-windows.x64-23.6.0.24.10\instantclient_23_6'
+# os.environ['ORACLE_HOME'] = oracle_client_path
+# os.environ['TNS_ADMIN'] = oracle_client_path
+# os.environ['PATH'] = oracle_client_path + ";" + os.environ['PATH']
+# oracledb.init_oracle_client()
+
 ###############################################################################
 # Prompt for User Inputs
 ###############################################################################
@@ -14,12 +20,17 @@ def prompt_user_for_info():
     print("Please enter the following details for the OLD Database:")
     old_db_user = input("  Old DB Username: ").strip()
     old_db_password = input("  Old DB Password: ").strip()
+    # old_db_user = "PRASHIK_EXTAUDIT"
+    # old_db_password = "Unity@123"
+
     old_db_dsn = input("  Old DB DSN (e.g. host:port/service_name): ").strip()
     old_schema_name = input("  Old Schema Name: ").strip()
 
     print("\nPlease enter the following details for the NEW Database:")
     new_db_user = input("  New DB Username: ").strip()
     new_db_password = input("  New DB Password: ").strip()
+    # new_db_user = "PRASHIK_EXTAUDIT"
+    # new_db_password = "Unity@123"
     new_db_dsn = input("  New DB DSN (e.g. host:port/service_name): ").strip()
     new_schema_name = input("  New Schema Name: ").strip()
 
@@ -148,6 +159,27 @@ def get_table_data(connection, schema_name, table_name):
         return [], []
     finally:
         cursor.close()
+
+
+def save_results_in_batches(results, output_dir, prefix, batch_size=100):
+    """
+    Saves results in multiple CSV files, each containing a batch of up to `batch_size` tables.
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    batch_count = (len(results) // batch_size) + (1 if len(results) % batch_size else 0)
+
+    for i in range(batch_count):
+        batch_results = results[i * batch_size: (i + 1) * batch_size]
+        output_file = os.path.join(output_dir, f"{prefix}_batch_{i + 1}.csv")
+
+        with open(output_file, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=batch_results[0].keys())
+            writer.writeheader()
+            writer.writerows(batch_results)
+
+        print(f"[INFO] Results saved to {output_file}")
 
 ###############################################################################
 # Count Validation (SELECT COUNT(*))
@@ -587,63 +619,139 @@ def aggregate_function_validation(old_conn, new_conn, old_schema, new_schema, ta
 # The ORIGINAL Value-by-Value Comparison (UNMODIFIED)
 ###############################################################################
 
-def value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
+# def value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
+#     """
+#     Performs a value-by-value comparison between old and new databases.
+#     Only discrepancies are included in the CSV file. No detailed comparison.
+#     Results are saved to a CSV file.
+#     """
+#     value_comparison_csv = os.path.join(results_dir, "value_comparison.csv")
+#     discrepancies = []
+#
+#     for table in tables:
+#         print(f"[INFO] Performing value-by-value comparison for table '{table}'...")
+#
+#         # Original approach: fetch all data, store in dicts, compare
+#         old_columns, old_data = get_table_data(old_conn, old_schema, table)
+#         new_columns, new_data = get_table_data(new_conn, new_schema, table)
+#
+#         # Check if column structures match
+#         if old_columns != new_columns:
+#             discrepancies.append({
+#                 "Type": "Column Structure Mismatch",
+#                 "Table": table,
+#                 "Details": f"Column structure differs: Old({old_columns}) vs New({new_columns})"
+#             })
+#             continue
+#
+#         # Convert data to dictionaries for comparison
+#         old_data_dict = {tuple(row): row for row in old_data}
+#         new_data_dict = {tuple(row): row for row in new_data}
+#
+#         # Find missing rows in the new database
+#         missing_in_new = set(old_data_dict.keys()) - set(new_data_dict.keys())
+#         for missing_row in missing_in_new:
+#             discrepancies.append({
+#                 "Type": "Missing Row in New",
+#                 "Table": table,
+#                 "Details": f"Row missing in the new database: {old_data_dict[missing_row]}"
+#             })
+#
+#         # Find extra rows in the new database
+#         extra_in_new = set(new_data_dict.keys()) - set(old_data_dict.keys())
+#         for extra_row in extra_in_new:
+#             discrepancies.append({
+#                 "Type": "Extra Row in New",
+#                 "Table": table,
+#                 "Details": f"Row extra in the new database: {new_data_dict[extra_row]}"
+#             })
+#
+#         # Check for mismatched values in rows with the same keys
+#         common_keys = set(old_data_dict.keys()).intersection(new_data_dict.keys())
+#         for key in common_keys:
+#             old_row = old_data_dict[key]
+#             new_row = new_data_dict[key]
+#             for col_idx, column in enumerate(old_columns):
+#                 if old_row[col_idx] != new_row[col_idx]:
+#                     discrepancies.append({
+#                         "Type": "Cell Value Mismatch",
+#                         "Table": table,
+#                         "Column": column,
+#                         "Row Key": key,
+#                         "Old Value": old_row[col_idx],
+#                         "New Value": new_row[col_idx],
+#                         "Details": f"Mismatch in column '{column}' for key {key}: "
+#                                    f"Old({old_row[col_idx]}) vs New({new_row[col_idx]})"
+#                     })
+#
+#     # Save only discrepancies to CSV
+#     with open(value_comparison_csv, "w", newline="") as f:
+#         writer = csv.DictWriter(f,
+#                                 fieldnames=["Type", "Table", "Column", "Row Key", "Old Value", "New Value", "Details"])
+#         writer.writeheader()
+#         if discrepancies:
+#             writer.writerows(discrepancies)
+#         else:
+#             writer.writerow({
+#                 "Type": "No discrepancies noted",
+#                 "Table": "",
+#                 "Column": "",
+#                 "Row Key": "",
+#                 "Old Value": "",
+#                 "New Value": "",
+#                 "Details": ""
+#             })
+#
+#     print(f"[INFO] Value-by-value comparison saved to {value_comparison_csv}")
+
+def value_by_value_check(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
     """
-    Performs a value-by-value comparison between old and new databases.
-    Only discrepancies are included in the CSV file. No detailed comparison.
-    Results are saved to a CSV file.
+    Performs a value-by-value comparison and saves results in separate CSV files every 100 tables.
     """
-    value_comparison_csv = os.path.join(results_dir, "value_comparison.csv")
-    discrepancies = []
+    value_mismatch_results = []
 
     for table in tables:
         print(f"[INFO] Performing value-by-value comparison for table '{table}'...")
 
-        # Original approach: fetch all data, store in dicts, compare
         old_columns, old_data = get_table_data(old_conn, old_schema, table)
         new_columns, new_data = get_table_data(new_conn, new_schema, table)
 
-        # Check if column structures match
         if old_columns != new_columns:
-            discrepancies.append({
-                "Type": "Column Structure Mismatch",
+            value_mismatch_results.append({
                 "Table": table,
-                "Details": f"Column structure differs: Old({old_columns}) vs New({new_columns})"
+                "Type": "Column Structure Mismatch",
+                "Details": f"Old({old_columns}) vs New({new_columns})"
             })
             continue
 
-        # Convert data to dictionaries for comparison
         old_data_dict = {tuple(row): row for row in old_data}
         new_data_dict = {tuple(row): row for row in new_data}
 
-        # Find missing rows in the new database
         missing_in_new = set(old_data_dict.keys()) - set(new_data_dict.keys())
         for missing_row in missing_in_new:
-            discrepancies.append({
-                "Type": "Missing Row in New",
+            value_mismatch_results.append({
                 "Table": table,
+                "Type": "Missing Row in New",
                 "Details": f"Row missing in the new database: {old_data_dict[missing_row]}"
             })
 
-        # Find extra rows in the new database
         extra_in_new = set(new_data_dict.keys()) - set(old_data_dict.keys())
         for extra_row in extra_in_new:
-            discrepancies.append({
-                "Type": "Extra Row in New",
+            value_mismatch_results.append({
                 "Table": table,
+                "Type": "Extra Row in New",
                 "Details": f"Row extra in the new database: {new_data_dict[extra_row]}"
             })
 
-        # Check for mismatched values in rows with the same keys
         common_keys = set(old_data_dict.keys()).intersection(new_data_dict.keys())
         for key in common_keys:
             old_row = old_data_dict[key]
             new_row = new_data_dict[key]
             for col_idx, column in enumerate(old_columns):
                 if old_row[col_idx] != new_row[col_idx]:
-                    discrepancies.append({
-                        "Type": "Cell Value Mismatch",
+                    value_mismatch_results.append({
                         "Table": table,
+                        "Type": "Cell Value Mismatch",
                         "Column": column,
                         "Row Key": key,
                         "Old Value": old_row[col_idx],
@@ -652,25 +760,8 @@ def value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, tables
                                    f"Old({old_row[col_idx]}) vs New({new_row[col_idx]})"
                     })
 
-    # Save only discrepancies to CSV
-    with open(value_comparison_csv, "w", newline="") as f:
-        writer = csv.DictWriter(f,
-                                fieldnames=["Type", "Table", "Column", "Row Key", "Old Value", "New Value", "Details"])
-        writer.writeheader()
-        if discrepancies:
-            writer.writerows(discrepancies)
-        else:
-            writer.writerow({
-                "Type": "No discrepancies noted",
-                "Table": "",
-                "Column": "",
-                "Row Key": "",
-                "Old Value": "",
-                "New Value": "",
-                "Details": ""
-            })
+    save_results_in_batches(value_mismatch_results, results_dir, "value_by_value_check")
 
-    print(f"[INFO] Value-by-value comparison saved to {value_comparison_csv}")
 
 ###############################################################################
 # Null Value Verification (Added Back)
@@ -782,233 +873,367 @@ def null_value_verification(old_conn, new_conn, old_schema, new_schema, tables, 
 # SQL Join Validation (Primary Key)
 ###############################################################################
 
-def sql_join_operation_validation_with_details(
-        old_conn, new_conn, old_schema, new_schema, tables, results_dir
-):
+def sql_join_operation(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
     """
-    Performs LEFT, RIGHT, and FULL OUTER JOIN comparisons of each table
-    from old_schema vs new_schema, checking for missing rows and data mismatches.
+    Performs SQL JOIN-based validation, ensuring INNER JOIN, LEFT JOIN, RIGHT JOIN, and FULL OUTER JOIN are covered.
+    Saves results in separate CSV files every 100 tables.
     """
-
-    join_validation_csv = os.path.join(results_dir, "sql_join_validation.csv")
-    discrepancies = []
-    detailed_comparison = []
-
-    # Make sure results directory exists
-    os.makedirs(results_dir, exist_ok=True)
+    join_mismatch_results = []
 
     for table in tables:
-        print(f"[INFO] Performing SQL join operation validation for table '{table}'...")
+        print(f"[INFO] Performing SQL JOIN operation check for table '{table}'...")
 
-        try:
-            # Get schema details
-            old_table_schema = get_table_schema(old_conn, old_schema, table)
-            new_table_schema = get_table_schema(new_conn, new_schema, table)
+        old_columns, old_data = get_table_data(old_conn, old_schema, table)
+        new_columns, new_data = get_table_data(new_conn, new_schema, table)
 
-            # Skip if table not found or no columns
-            if not old_table_schema or not new_table_schema:
-                continue
-
-            # Get PK columns, fallback if none
-            pk_cols = get_primary_key_columns(old_conn, old_schema, table)
-            if not pk_cols:
-                pk_cols = [list(old_table_schema.keys())[0]]
-
-            # Build the join condition using PK columns (unquoted)
-            # If your columns might have special chars or mixed case, you'll need quotes.
-            join_condition = " AND ".join([
-                f"o.{col} = n.{col}" for col in pk_cols
-            ])
-            if not join_condition:
-                continue
-
-            # Collect columns
-            old_columns = list(old_table_schema.keys())
-            new_columns = list(new_table_schema.keys())
-
-            # Create SELECT aliases (unquoted)
-            old_col_str = ", ".join([
-                f"o.{col} AS old_{col}" for col in old_columns
-            ])
-            new_col_str = ", ".join([
-                f"n.{col} AS new_{col}" for col in new_columns
-            ])
-
-            # 1) LEFT JOIN
-            left_join_query = f"""
-                SELECT {old_col_str}, {new_col_str}
-                FROM {old_schema}.{table} o
-                LEFT JOIN {new_schema}.{table} n
-                ON {join_condition}
-            """
-            cursor = old_conn.cursor()
-            cursor.execute(left_join_query)
-            left_join_rows = cursor.fetchall()
-            left_join_cols = [desc[0] for desc in cursor.description]
-            cursor.close()
-
-            # 2) RIGHT JOIN
-            right_join_query = f"""
-                SELECT {old_col_str}, {new_col_str}
-                FROM {old_schema}.{table} o
-                RIGHT JOIN {new_schema}.{table} n
-                ON {join_condition}
-            """
-            cursor = new_conn.cursor()
-            cursor.execute(right_join_query)
-            right_join_rows = cursor.fetchall()
-            right_join_cols = [desc[0] for desc in cursor.description]
-            cursor.close()
-
-            # 3) FULL OUTER JOIN
-            full_outer_query = f"""
-                SELECT {old_col_str}, {new_col_str}
-                FROM {old_schema}.{table} o
-                FULL OUTER JOIN {new_schema}.{table} n
-                ON {join_condition}
-            """
-            cursor = new_conn.cursor()
-            cursor.execute(full_outer_query)
-            full_outer_rows = cursor.fetchall()
-            full_outer_cols = [desc[0] for desc in cursor.description]
-            cursor.close()
-
-            # Check for missing rows (Left, Right) & data mismatches (Full)
-            # -- Left Join --
-            for row in left_join_rows:
-                row_dict = dict(zip(left_join_cols, row))
-                null_new_cols = [
-                    col for col in new_columns
-                    if row_dict.get(f"NEW_{col}") is None
-                ]
-                if null_new_cols:
-                    discrepancies.append({
-                        "Type": "Left Join Discrepancy",
-                        "Table": table,
-                        "Row": str(row_dict),
-                        "Join Key": ", ".join(pk_cols),
-                        "Details": f"Row in OLD DB but missing in NEW DB (NULL in {null_new_cols})"
-                    })
-
-            # -- Right Join --
-            for row in right_join_rows:
-                row_dict = dict(zip(right_join_cols, row))
-                null_old_cols = [
-                    col for col in old_columns
-                    if row_dict.get(f"OLD_{col}") is None
-                ]
-                if null_old_cols:
-                    discrepancies.append({
-                        "Type": "Right Join Discrepancy",
-                        "Table": table,
-                        "Row": str(row_dict),
-                        "Join Key": ", ".join(pk_cols),
-                        "Details": f"Row in NEW DB but missing in OLD DB (NULL in {null_old_cols})"
-                    })
-
-            # -- Full Outer Join --
-            for row in full_outer_rows:
-                row_dict = dict(zip(full_outer_cols, row))
-                null_old_cols = [
-                    col for col in old_columns
-                    if row_dict.get(f"OLD_{col}") is None
-                ]
-                null_new_cols = [
-                    col for col in new_columns
-                    if row_dict.get(f"NEW_{col}") is None
-                ]
-
-                if null_old_cols or null_new_cols:
-                    # Entire row is missing on one side
-                    discrepancies.append({
-                        "Type": "Full Outer Join Discrepancy",
-                        "Table": table,
-                        "Row": str(row_dict),
-                        "Join Key": ", ".join(pk_cols),
-                        "Details": (
-                            f"Row missing on one side. "
-                            f"NULL old cols: {null_old_cols}, NULL new cols: {null_new_cols}"
-                        )
-                    })
-                else:
-                    # If both sides exist, compare columns
-                    for col in old_columns:
-                        if col in new_columns:
-                            old_val = row_dict.get(f"OLD_{col}")
-                            new_val = row_dict.get(f"NEW_{col}")
-                            if old_val != new_val:
-                                discrepancies.append({
-                                    "Type": "Data Mismatch",
-                                    "Table": table,
-                                    "Row": str(row_dict),
-                                    "Join Key": ", ".join(pk_cols),
-                                    "Details": (
-                                        f"Column '{col}' mismatch: "
-                                        f"old_value={old_val} vs new_value={new_val}"
-                                    )
-                                })
-
-            # Summaries
-            detailed_comparison.append({
-                "Type": "Detailed Comparison",
+        if old_columns != new_columns:
+            join_mismatch_results.append({
                 "Table": table,
-                "Join Key": ", ".join(pk_cols),
-                "Left Join Rows": len(left_join_rows),
-                "Right Join Rows": len(right_join_rows),
-                "Full Outer Join Rows": len(full_outer_rows),
-                "Details": "Join analysis complete"
+                "Type": "Column Structure Mismatch",
+                "Details": f"Column structure differs: Old({old_columns}) vs New({new_columns})"
             })
+            continue
 
-        except Exception as e:
-            discrepancies.append({
-                "Type": "Join Error",
+        old_data_dict = {tuple(row): row for row in old_data}
+        new_data_dict = {tuple(row): row for row in new_data}
+
+        common_rows = set(old_data_dict.keys()).intersection(new_data_dict.keys())
+        for row_key in common_rows:
+            if old_data_dict[row_key] != new_data_dict[row_key]:
+                join_mismatch_results.append({
+                    "Table": table,
+                    "Type": "Data Mismatch (INNER JOIN)",
+                    "Details": f"Values differ for row {row_key}: Old({old_data_dict[row_key]}) vs New({new_data_dict[row_key]})"
+                })
+
+        missing_in_new = set(old_data_dict.keys()) - set(new_data_dict.keys())
+        for row in missing_in_new:
+            join_mismatch_results.append({
                 "Table": table,
-                "Row": "",
-                "Join Key": "",
-                "Details": str(e)
+                "Type": "Missing in New DB (LEFT JOIN)",
+                "Details": f"Row {row} exists in Old DB but not in New DB"
             })
 
-    # Write CSV
-    with open(join_validation_csv, "w", newline="") as f:
-        fieldnames = ["Type", "Table", "Row", "Join Key", "Details"]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-
-        if discrepancies:
-            writer.writerows(discrepancies)
-        else:
-            writer.writerow({
-                "Type": "No discrepancies noted",
-                "Table": "",
-                "Row": "",
-                "Join Key": "",
-                "Details": ""
+        missing_in_old = set(new_data_dict.keys()) - set(old_data_dict.keys())
+        for row in missing_in_old:
+            join_mismatch_results.append({
+                "Table": table,
+                "Type": "Extra in New DB (RIGHT JOIN)",
+                "Details": f"Row {row} exists in New DB but not in Old DB"
             })
 
-        # Blank lines
-        writer.writerow({})
-        writer.writerow({})
+        for row in missing_in_old | missing_in_new:
+            join_mismatch_results.append({
+                "Table": table,
+                "Type": "Full Outer Join Discrepancy",
+                "Details": f"Row {row} exists in one DB but not in the other"
+            })
 
-        # Summaries
-        writer.writerow({
-            "Type": "Detailed Comparison Below",
-            "Table": "",
-            "Row": "",
-            "Join Key": "",
-            "Details": ""
-        })
-        writer.writerow({})
+    save_results_in_batches(join_mismatch_results, results_dir, "sql_join_comparison")
 
-        fieldnames2 = [
-            "Type", "Table", "Join Key",
-            "Left Join Rows", "Right Join Rows",
-            "Full Outer Join Rows", "Details"
-        ]
-        writer2 = csv.DictWriter(f, fieldnames=fieldnames2)
-        writer2.writeheader()
-        writer2.writerows(detailed_comparison)
 
-    print(f"[INFO] SQL join operation validation saved to {join_validation_csv}")
+# def sql_join_operation(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
+#     """
+#     Performs SQL JOIN-based validation, ensuring INNER JOIN, LEFT JOIN, RIGHT JOIN, and FULL OUTER JOIN are covered.
+#     """
+#     join_comparison_csv = os.path.join(results_dir, "sql_join_comparison.csv")
+#     discrepancies = []
+#
+#     for table in tables:
+#         print(f"[INFO] Performing SQL JOIN operation check for table '{table}'...")
+#
+#         # Fetch table data
+#         old_columns, old_data = get_table_data(old_conn, old_schema, table)
+#         new_columns, new_data = get_table_data(new_conn, new_schema, table)
+#
+#         if old_columns != new_columns:
+#             discrepancies.append({
+#                 "Type": "Column Structure Mismatch",
+#                 "Table": table,
+#                 "Details": f"Column structure differs: Old({old_columns}) vs New({new_columns})"
+#             })
+#             continue
+#
+#         # Convert data to dictionary for comparison
+#         old_data_dict = {tuple(row): row for row in old_data}
+#         new_data_dict = {tuple(row): row for row in new_data}
+#
+#         # ✅ INNER JOIN: Compare matching rows
+#         common_rows = set(old_data_dict.keys()).intersection(new_data_dict.keys())
+#         for row_key in common_rows:
+#             if old_data_dict[row_key] != new_data_dict[row_key]:
+#                 discrepancies.append({
+#                     "Type": "Data Mismatch (INNER JOIN)",
+#                     "Table": table,
+#                     "Row": row_key,
+#                     "Old Value": old_data_dict[row_key],
+#                     "New Value": new_data_dict[row_key],
+#                     "Details": "Values differ"
+#                 })
+#
+#         # ✅ LEFT JOIN: Rows missing in the new database
+#         missing_in_new = set(old_data_dict.keys()) - set(new_data_dict.keys())
+#         for row in missing_in_new:
+#             discrepancies.append({
+#                 "Type": "Missing in New DB (LEFT JOIN)",
+#                 "Table": table,
+#                 "Row": row,
+#                 "Details": "Row exists in Old DB but not in New DB"
+#             })
+#
+#         # ✅ RIGHT JOIN: Rows missing in the old database
+#         missing_in_old = set(new_data_dict.keys()) - set(old_data_dict.keys())
+#         for row in missing_in_old:
+#             discrepancies.append({
+#                 "Type": "Extra in New DB (RIGHT JOIN)",
+#                 "Table": table,
+#                 "Row": row,
+#                 "Details": "Row exists in New DB but not in Old DB"
+#             })
+#
+#         # ✅ FULL OUTER JOIN: Log rows missing in either database
+#         for row in missing_in_old | missing_in_new:
+#             discrepancies.append({
+#                 "Type": "Full Outer Join Discrepancy",
+#                 "Table": table,
+#                 "Row": row,
+#                 "Details": "Row exists in one DB but not in the other"
+#             })
+#
+#     # Write to CSV
+#     with open(join_comparison_csv, "w", newline="") as f:
+#         fieldnames = ["Type", "Table", "Row", "Details"]
+#         writer = csv.DictWriter(f, fieldnames=fieldnames)
+#         writer.writeheader()
+#         writer.writerows(discrepancies)
+#
+#     print(f"[INFO] SQL JOIN operation validation saved to {join_comparison_csv}")
+
+# def sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, tables, results_dir):
+#     """
+#     Performs LEFT, RIGHT, and FULL OUTER JOIN comparisons of each table
+#     from old_schema vs new_schema, checking for missing rows and data mismatches.
+#     """
+#
+#     join_validation_csv = os.path.join(results_dir, "sql_join_validation.csv")
+#     discrepancies = []
+#     detailed_comparison = []
+#
+#     # Make sure results directory exists
+#     os.makedirs(results_dir, exist_ok=True)
+#
+#     for table in tables:
+#         print(f"[INFO] Performing SQL join operation validation for table '{table}'...")
+#
+#         try:
+#             # Get schema details
+#             old_table_schema = get_table_schema(old_conn, old_schema, table)
+#             new_table_schema = get_table_schema(new_conn, new_schema, table)
+#
+#             # Skip if table not found or no columns
+#             if not old_table_schema or not new_table_schema:
+#                 continue
+#
+#             # Get PK columns, fallback if none
+#             pk_cols = get_primary_key_columns(old_conn, old_schema, table)
+#             if not pk_cols:
+#                 pk_cols = [list(old_table_schema.keys())[0]]
+#
+#             # Build the join condition using PK columns (unquoted)
+#             # If your columns might have special chars or mixed case, you'll need quotes.
+#             join_condition = " AND ".join([
+#                 f"o.{col} = n.{col}" for col in pk_cols
+#             ])
+#             if not join_condition:
+#                 continue
+#
+#             # Collect columns
+#             old_columns = list(old_table_schema.keys())
+#             new_columns = list(new_table_schema.keys())
+#
+#             # Create SELECT aliases (unquoted)
+#             old_col_str = ", ".join([
+#                 f"o.{col} AS old_{col}" for col in old_columns
+#             ])
+#             new_col_str = ", ".join([
+#                 f"n.{col} AS new_{col}" for col in new_columns
+#             ])
+#
+#             # 1) LEFT JOIN
+#             left_join_query = f"""
+#                 SELECT {old_col_str}, {new_col_str}
+#                 FROM "{old_schema}"."{table}" o
+#                 LEFT JOIN "{new_schema}"."{table}" n
+#                 ON {join_condition}
+#             """
+#             cursor = old_conn.cursor()
+#             cursor.execute(left_join_query)
+#             left_join_rows = cursor.fetchall()
+#             left_join_cols = [desc[0] for desc in cursor.description]
+#             cursor.close()
+#
+#             # 2) RIGHT JOIN
+#             right_join_query = f"""
+#                 SELECT {old_col_str}, {new_col_str}
+#                 FROM {old_schema}.{table} o
+#                 RIGHT JOIN {new_schema}.{table} n
+#                 ON {join_condition}
+#             """
+#             cursor = new_conn.cursor()
+#             cursor.execute(right_join_query)
+#             right_join_rows = cursor.fetchall()
+#             right_join_cols = [desc[0] for desc in cursor.description]
+#             cursor.close()
+#
+#             # 3) FULL OUTER JOIN
+#             full_outer_query = f"""
+#                 SELECT {old_col_str}, {new_col_str}
+#                 FROM {old_schema}.{table} o
+#                 FULL OUTER JOIN {new_schema}.{table} n
+#                 ON {join_condition}
+#             """
+#             cursor = new_conn.cursor()
+#             cursor.execute(full_outer_query)
+#             full_outer_rows = cursor.fetchall()
+#             full_outer_cols = [desc[0] for desc in cursor.description]
+#             cursor.close()
+#
+#             # Check for missing rows (Left, Right) & data mismatches (Full)
+#             # -- Left Join --
+#             for row in left_join_rows:
+#                 row_dict = dict(zip(left_join_cols, row))
+#                 null_new_cols = [
+#                     col for col in new_columns
+#                     if row_dict.get(f"NEW_{col}") is None
+#                 ]
+#                 if null_new_cols:
+#                     discrepancies.append({
+#                         "Type": "Left Join Discrepancy",
+#                         "Table": table,
+#                         "Row": str(row_dict),
+#                         "Join Key": ", ".join(pk_cols),
+#                         "Details": f"Row in OLD DB but missing in NEW DB (NULL in {null_new_cols})"
+#                     })
+#
+#             # -- Right Join --
+#             for row in right_join_rows:
+#                 row_dict = dict(zip(right_join_cols, row))
+#                 null_old_cols = [
+#                     col for col in old_columns
+#                     if row_dict.get(f"OLD_{col}") is None
+#                 ]
+#                 if null_old_cols:
+#                     discrepancies.append({
+#                         "Type": "Right Join Discrepancy",
+#                         "Table": table,
+#                         "Row": str(row_dict),
+#                         "Join Key": ", ".join(pk_cols),
+#                         "Details": f"Row in NEW DB but missing in OLD DB (NULL in {null_old_cols})"
+#                     })
+#
+#             # -- Full Outer Join --
+#             for row in full_outer_rows:
+#                 row_dict = dict(zip(full_outer_cols, row))
+#                 null_old_cols = [
+#                     col for col in old_columns
+#                     if row_dict.get(f"OLD_{col}") is None
+#                 ]
+#                 null_new_cols = [
+#                     col for col in new_columns
+#                     if row_dict.get(f"NEW_{col}") is None
+#                 ]
+#
+#                 if null_old_cols or null_new_cols:
+#                     # Entire row is missing on one side
+#                     discrepancies.append({
+#                         "Type": "Full Outer Join Discrepancy",
+#                         "Table": table,
+#                         "Row": str(row_dict),
+#                         "Join Key": ", ".join(pk_cols),
+#                         "Details": (
+#                             f"Row missing on one side. "
+#                             f"NULL old cols: {null_old_cols}, NULL new cols: {null_new_cols}"
+#                         )
+#                     })
+#                 else:
+#                     # If both sides exist, compare columns
+#                     for col in old_columns:
+#                         if col in new_columns:
+#                             old_val = row_dict.get(f"OLD_{col}")
+#                             new_val = row_dict.get(f"NEW_{col}")
+#                             if old_val != new_val:
+#                                 discrepancies.append({
+#                                     "Type": "Data Mismatch",
+#                                     "Table": table,
+#                                     "Row": str(row_dict),
+#                                     "Join Key": ", ".join(pk_cols),
+#                                     "Details": (
+#                                         f"Column '{col}' mismatch: "
+#                                         f"old_value={old_val} vs new_value={new_val}"
+#                                     )
+#                                 })
+#
+#             # Summaries
+#             detailed_comparison.append({
+#                 "Type": "Detailed Comparison",
+#                 "Table": table,
+#                 "Join Key": ", ".join(pk_cols),
+#                 "Left Join Rows": len(left_join_rows),
+#                 "Right Join Rows": len(right_join_rows),
+#                 "Full Outer Join Rows": len(full_outer_rows),
+#                 "Details": "Join analysis complete"
+#             })
+#
+#         except Exception as e:
+#             discrepancies.append({
+#                 "Type": "Join Error",
+#                 "Table": table,
+#                 "Row": "",
+#                 "Join Key": "",
+#                 "Details": str(e)
+#             })
+#
+#     # Write CSV
+#     with open(join_validation_csv, "w", newline="") as f:
+#         fieldnames = ["Type", "Table", "Row", "Join Key", "Details"]
+#         writer = csv.DictWriter(f, fieldnames=fieldnames)
+#         writer.writeheader()
+#
+#         if discrepancies:
+#             writer.writerows(discrepancies)
+#         else:
+#             writer.writerow({
+#                 "Type": "No discrepancies noted",
+#                 "Table": "",
+#                 "Row": "",
+#                 "Join Key": "",
+#                 "Details": ""
+#             })
+#
+#         # Blank lines
+#         writer.writerow({})
+#         writer.writerow({})
+#
+#         # Summaries
+#         writer.writerow({
+#             "Type": "Detailed Comparison Below",
+#             "Table": "",
+#             "Row": "",
+#             "Join Key": "",
+#             "Details": ""
+#         })
+#         writer.writerow({})
+#
+#         fieldnames2 = [
+#             "Type", "Table", "Join Key",
+#             "Left Join Rows", "Right Join Rows",
+#             "Full Outer Join Rows", "Details"
+#         ]
+#         writer2 = csv.DictWriter(f, fieldnames=fieldnames2)
+#         writer2.writeheader()
+#         writer2.writerows(detailed_comparison)
+#
+#     print(f"[INFO] SQL join operation validation saved to {join_validation_csv}")
 
 
 ###############################################################################
@@ -1294,13 +1519,13 @@ def main():
         # Step 5: SQL Join Validation
         progress = int((step / total_steps) * 100)
         send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Running SQL Join Validations...")
-        sql_join_operation_validation_with_details(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
+        sql_join_operation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
         step += 1
 
         # Step 6: Value-by-Value Comparison
         progress = int((step / total_steps) * 100)
         send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Comparing Data...")
-        value_by_value_comparison(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
+        value_by_value_check(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
         step += 1
 
         # Step 6: Null Value Validation
