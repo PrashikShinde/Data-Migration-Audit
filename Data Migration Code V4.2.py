@@ -4,7 +4,9 @@ import os
 import datetime
 import subprocess
 import time
+import itertools
 from notify_on_completion import send_telegram_notification, BOT_TOKEN, CHAT_IDS
+
 
 # oracle_client_path = r'D:\Users\T000670\Downloads\instantclient-basic-windows.x64-23.6.0.24.10\instantclient_23_6'
 # os.environ['ORACLE_HOME'] = oracle_client_path
@@ -139,7 +141,7 @@ def get_primary_key_columns(connection, schema_name, table_name):
     return columns
 
 ###############################################################################
-# Original get_table_data (Used By Original Value-by-Value Comparison)
+# Original get_table_data and other helper functions
 ###############################################################################
 
 def get_table_data(connection, schema_name, table_name):
@@ -1457,94 +1459,159 @@ def miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, resu
 # Main
 ###############################################################################
 
+# def main():
+#     num_iterations = int(input("Enter the number of times you want to run the migration audit process: ").strip())
+#     params_list = []
+#
+#     for i in range(num_iterations):
+#         print(f"\n[INFO] Enter details for Run {i + 1}:")
+#         params = prompt_user_for_info()
+#         params_list.append(params)
+#
+#     for run_num, params in enumerate(params_list, start=1):
+#         print(f"\n[INFO] Starting Migration Run {run_num} of {num_iterations}...")
+#
+#         notification_process = subprocess.Popen(["python", "notify_on_completion.py"], stdout=subprocess.DEVNULL,
+#                                                 stderr=subprocess.DEVNULL)
+#         time.sleep(2)  # Allow bot script to initialize
+#
+#         old_db_config = params["old_db_config"]
+#         new_db_config = params["new_db_config"]
+#         old_schema = old_db_config["schema"]
+#         new_schema = new_db_config["schema"]
+#
+#         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+#         results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
+#         os.makedirs(results_dir, exist_ok=True)
+#
+#         total_steps = 7
+#         step = 0
+#
+#         try:
+#             print("\n[INFO] Establishing database connections...")
+#             old_conn = get_oracle_connection(old_db_config)
+#             new_conn = get_oracle_connection(new_db_config)
+#             print("Connection Established Successfully!!")
+#             send_telegram_notification(BOT_TOKEN, CHAT_IDS, "✅ Database Connection Established Successfully!")
+#
+#             old_tables = get_table_list(old_conn, old_schema)
+#             new_tables = get_table_list(new_conn, new_schema)
+#             common_tables = set(old_tables).intersection(new_tables)
+#
+#             steps = [
+#                 ("Validating Table Sanity", miscellaneous_discrepancies,
+#                  [old_conn, new_conn, old_schema, new_schema, results_dir]),
+#                 ("Validating Schema", schema_validation, [old_conn, new_conn, old_schema, new_schema, results_dir]),
+#                 ("Checking Row Counts", count_validation, [old_conn, new_conn, old_schema, new_schema, results_dir]),
+#                 ("Performing Aggregate Checks", aggregate_function_validation,
+#                  [old_conn, new_conn, old_schema, new_schema, common_tables, results_dir]),
+#                 ("Running SQL Join Validations", sql_join_operation,
+#                  [old_conn, new_conn, old_schema, new_schema, common_tables, results_dir]),
+#                 ("Comparing Data", value_by_value_check,
+#                  [old_conn, new_conn, old_schema, new_schema, common_tables, results_dir]),
+#                 ("Checking for NULL Values", null_value_verification,
+#                  [old_conn, new_conn, old_schema, new_schema, common_tables, results_dir])
+#             ]
+#
+#             for task_name, function, args in steps:
+#                 progress = int((step / total_steps) * 100)
+#                 send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - {task_name}...")
+#                 function(*args)
+#                 step += 1
+#
+#             send_telegram_notification(BOT_TOKEN, CHAT_IDS,
+#                                        f"✅ Data Migration Audit Run {run_num} Completed Successfully!")
+#             print(f"\n[INFO] Data Migration Audit Run {run_num} Completed Successfully!")
+#
+#         except Exception as e:
+#             send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"⚠️ Error in Run {run_num}: {str(e)}")
+#             print(f"[ERROR] Migration Run {run_num} failed: {e}")
+#
+#         finally:
+#             close_connection(old_conn)
+#             close_connection(new_conn)
+#             print("Connection Closed!!")
+#             send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"❎ Database Connection Closed for Run {run_num}!")
+#
+#     print("\n[INFO] All Migration Runs Completed Successfully!")
+#     send_telegram_notification(BOT_TOKEN, CHAT_IDS, "🎉 All Migration Runs Completed Successfully!")
+#
+#
+# if __name__ == "__main__":
+#     main()
+
 def main():
-    params = prompt_user_for_info()
-    # Start the notification script in the background
-    notification_process = subprocess.Popen(["python", "notify_on_completion.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    num_iterations = int(input("Enter the number of times you want to run the migration process: ").strip())
+    params_list = []
 
-    # Allow the bot script to initialize
-    time.sleep(2)
+    for i in range(num_iterations):
+        print(f"\n[INFO] Enter details for Run {i + 1}:")
+        params = prompt_user_for_info()
+        params_list.append(params)
 
-    old_db_config = params["old_db_config"]
-    new_db_config = params["new_db_config"]
+    for run_num, params in enumerate(params_list, start=1):
+        old_db_config = params["old_db_config"]
+        new_db_config = params["new_db_config"]
+        old_schema = old_db_config["schema"]
+        new_schema = new_db_config["schema"]
 
-    old_schema = old_db_config["schema"]
-    new_schema = new_db_config["schema"]
+        send_telegram_notification(BOT_TOKEN, CHAT_IDS,f"🔍 Starting Migration Run {run_num} of {num_iterations} for Database: {old_schema} -> {new_schema}...")
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
-    os.makedirs(results_dir, exist_ok=True)
+        print(f"\n[INFO] Starting Migration Run {run_num} of {num_iterations} for Database: {old_schema} -> {new_schema}...")
 
-    total_steps = 7
-    step = 0
+        notification_process = subprocess.Popen(["python", "notify_on_completion.py"], stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        time.sleep(2)  # Allow bot script to initialize
 
-    try:
-        print("\n[INFO] Establishing database connections...")
-        old_conn = get_oracle_connection(old_db_config)
-        new_conn = get_oracle_connection(new_db_config)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = os.path.join("audit_results", f"{old_schema}_{new_schema}", timestamp)
+        os.makedirs(results_dir, exist_ok=True)
 
-        print("Connection Established Successfully!!")
+        total_steps = 7
+        step = 0
 
-        # Table lists
-        old_tables = get_table_list(old_conn, old_schema)
-        new_tables = get_table_list(new_conn, new_schema)
-        common_tables = set(old_tables).intersection(new_tables)
+        try:
+            print("\n[INFO] Establishing database connections...")
+            old_conn = get_oracle_connection(old_db_config)
+            new_conn = get_oracle_connection(new_db_config)
+            print("Connection Established Successfully!!")
+            send_telegram_notification(BOT_TOKEN, CHAT_IDS,f"✅ Database Connection Established Successfully for {old_schema} -> {new_schema}!")
 
-        # Perform validations:
+            old_tables = get_table_list(old_conn, old_schema)
+            new_tables = get_table_list(new_conn, new_schema)
+            common_tables = set(old_tables).intersection(new_tables)
 
-        # Step 1: Table Sanity Check
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Validating Table Sanity...")
-        miscellaneous_discrepancies(old_conn, new_conn, old_schema, new_schema, results_dir)
-        step += 1
+            steps = [
+                ("Validating Table Sanity", miscellaneous_discrepancies,[old_conn, new_conn, old_schema, new_schema, results_dir]),
+                ("Validating Schema", schema_validation, [old_conn, new_conn, old_schema, new_schema, results_dir]),
+                ("Checking Row Counts", count_validation, [old_conn, new_conn, old_schema, new_schema, results_dir]),
+                ("Performing Aggregate Checks", aggregate_function_validation,[old_conn, new_conn, old_schema, new_schema, common_tables, results_dir]),
+                ("Running SQL Join Validations", sql_join_operation,[old_conn, new_conn, old_schema, new_schema, common_tables, results_dir]),
+                ("Comparing Data", value_by_value_check,[old_conn, new_conn, old_schema, new_schema, common_tables, results_dir]),
+                ("Checking for NULL Values", null_value_verification,[old_conn, new_conn, old_schema, new_schema, common_tables, results_dir])
+            ]
 
-        # Step 2: Schema Validation
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Validating Schema...")
-        schema_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
-        step += 1
+            for task_name, function, args in steps:
+                progress = int((step / total_steps) * 100)
+                send_telegram_notification(BOT_TOKEN, CHAT_IDS,f"📊 Progress: {progress}% - {task_name} for {old_schema} -> {new_schema}...")
+                function(*args)
+                step += 1
 
-        # step 3: Count Validation
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Checking Row Counts...")
-        count_validation(old_conn, new_conn, old_schema, new_schema, results_dir)
-        step += 1
+            send_telegram_notification(BOT_TOKEN, CHAT_IDS,f"✅ Data Migration Audit Run {run_num} Completed Successfully for {old_schema} -> {new_schema}!")
+            print(f"\n[INFO] Data Migration Audit Run {run_num} Completed Successfully for {old_schema} -> {new_schema}!")
 
-        # Step 4: Aggregate Function Validation
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Performing Aggregate Checks...")
-        aggregate_function_validation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        step += 1
+        except Exception as e:
+            send_telegram_notification(BOT_TOKEN, CHAT_IDS,f"⚠️ Error in Run {run_num} for {old_schema} -> {new_schema}: {str(e)}")
+            print(f"[ERROR] Migration Run {run_num} failed for {old_schema} -> {new_schema}: {e}")
 
-        # Step 5: SQL Join Validation
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Running SQL Join Validations...")
-        sql_join_operation(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        step += 1
+        finally:
+            close_connection(old_conn)
+            close_connection(new_conn)
+            print("Connection Closed!!")
+            send_telegram_notification(BOT_TOKEN, CHAT_IDS,f"❎ Database Connection Closed for Run {run_num} ({old_schema} -> {new_schema})!")
 
-        # Step 6: Value-by-Value Comparison
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Comparing Data...")
-        value_by_value_check(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        step += 1
+    print("\n[INFO] All Migration Runs Completed Successfully!")
+    send_telegram_notification(BOT_TOKEN, CHAT_IDS, "🎉 All Migration Runs Completed Successfully!")
 
-        # Step 6: Null Value Validation
-        progress = int((step / total_steps) * 100)
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"📊 Progress: {progress}% - Checking for NULL Values...")
-        null_value_verification(old_conn, new_conn, old_schema, new_schema, common_tables, results_dir)
-        step += 1
-
-        progress = 100
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, "✅ Data Migration Audit Completed Successfully!")
-
-    except Exception as e:
-        send_telegram_notification(BOT_TOKEN, CHAT_IDS, f"⚠️ Error: {str(e)}")
-        print(f"[ERROR] Migration failed: {e}")
-
-    finally:
-        close_connection(old_conn)
-        close_connection(new_conn)
-        print("Connection Closed!!")
 
 if __name__ == "__main__":
     main()
